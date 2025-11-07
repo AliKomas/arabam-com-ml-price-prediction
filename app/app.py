@@ -5,26 +5,35 @@ import pandas as pd
 import pyodbc
 import datetime
 import matplotlib.pyplot as plt
+import os
 
-# ------------------------------------------
-# 🎨 Full Navbar Renk Uyumu - Lacivert & Mavi
-# ------------------------------------------
+# -------------------------------
+# 📂 Dosya Yolları Ayarı
+# -------------------------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "model", "arabam_fiyat_tahmin_modeli.pkl")
+
+# ✅ Modeli güvenli şekilde yükle
+try:
+    model = joblib.load(MODEL_PATH)
+    print(f"✅ Model başarıyla yüklendi: {MODEL_PATH}")
+except FileNotFoundError:
+    st.error(f"❌ Model dosyası bulunamadı: {MODEL_PATH}")
+    st.stop()
+
+# -------------------------------
+# 🎨 Arayüz Ayarları
+# -------------------------------
 st.set_page_config(page_title="Arabam.com ML Tahmin Sistemi", page_icon="🚗", layout="centered")
 
 st.markdown("""
     <style>
-    /* 🌈 TAM ARKA PLAN */
-    body {
+    body, .stApp {
         background: linear-gradient(180deg, #1e3a8a, #2563eb);
         color: white;
         font-family: 'Segoe UI', sans-serif;
     }
-    .stApp {
-        background: linear-gradient(180deg, #1e3a8a, #2563eb);
-        color: white;
-    }
 
-    /* 🚗 NAVBAR */
     .navbar {
         background: linear-gradient(90deg, #2563eb, #1e3a8a);
         color: white;
@@ -35,48 +44,25 @@ st.markdown("""
         align-items: center;
         margin-bottom: 25px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        position: sticky;
-        top: 0;
-        z-index: 999;
     }
-    .navbar h1 {
-        color: white;
-        font-size: 24px;
-        margin: 0;
-        display: flex;
-        align-items: center;
-    }
-    .navbar img {
-        height: 32px;
-        margin-right: 10px;
-    }
-    .menu {
-        display: flex;
-        gap: 18px;
-    }
-    .menu a {
-        color: white;
-        text-decoration: none;
-        font-weight: 500;
-        padding: 6px 12px;
-        border-radius: 6px;
-        transition: 0.3s;
-    }
-    .menu a:hover {
-        background-color: rgba(255,255,255,0.2);
-    }
+    .navbar h1 { font-size: 24px; margin: 0; display: flex; align-items: center; }
+    .navbar img { height: 32px; margin-right: 10px; }
 
-    /* 🧾 KART BLOKLARI */
+    .menu { display: flex; gap: 18px; }
+    .menu a {
+        color: white; text-decoration: none; font-weight: 500;
+        padding: 6px 12px; border-radius: 6px; transition: 0.3s;
+    }
+    .menu a:hover { background-color: rgba(255,255,255,0.2); }
+
     div[data-testid="stVerticalBlock"] {
         background: rgba(255, 255, 255, 0.1);
         border-radius: 16px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        padding: 20px;
-        margin-bottom: 20px;
+        padding: 20px; margin-bottom: 20px;
         backdrop-filter: blur(12px);
     }
 
-    /* 🔢 INPUTLAR */
     div[data-testid="stNumberInput"] input,
     div[data-testid="stTextInput"] input {
         background-color: rgba(255, 255, 255, 0.15);
@@ -85,43 +71,31 @@ st.markdown("""
         border-radius: 8px;
         padding: 8px;
     }
-
     div[data-testid="stSelectbox"] div[data-baseweb="select"] {
         background-color: rgba(255, 255, 255, 0.15);
         color: #111827;
         border-radius: 8px;
     }
 
-    /* 🔘 BUTON */
     .stButton>button {
         background: linear-gradient(90deg, #3b82f6, #1e3a8a);
-        color: white;
-        font-weight: 600;
-        border-radius: 10px;
-        border: none;
-        padding: 0.6em 1.5em;
-        cursor: pointer;
-        transition: 0.3s ease;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        color: white; font-weight: 600; border-radius: 10px;
+        border: none; padding: 0.6em 1.5em; cursor: pointer;
+        transition: 0.3s ease; box-shadow: 0 3px 10px rgba(0,0,0,0.2);
     }
     .stButton>button:hover {
         background: linear-gradient(90deg, #60a5fa, #2563eb);
         transform: scale(1.05);
     }
 
-    /* 🔤 BAŞLIKLAR & METİNLER */
-    h1, h2, h3, h4, p, label, span, .stMarkdown {
-        color: white !important;
-    }
-
-    /* 📊 GRAFİK ARKA PLAN */
-    canvas {
-        background-color: transparent !important;
-    }
+    h1, h2, h3, h4, p, label, span, .stMarkdown { color: white !important; }
+    canvas { background-color: transparent !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# HEADER BAR
+# -------------------------------
+# 🔝 Navbar
+# -------------------------------
 st.markdown("""
 <div class="navbar">
     <h1><img src="https://cdn-icons-png.flaticon.com/512/743/743007.png" /> Arabam.com ML Tahmin</h1>
@@ -133,31 +107,29 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-
-
-# ------------------------------------------
-# ⚙️ Model ve Veritabanı Bağlantısı
-# ------------------------------------------
-model = joblib.load("arabam_fiyat_tahmin_modeli.pkl")
-
-conn_str = (
-    "Driver={SQL Server};"
-    "Server=DESKTOP-7NNG9GJ\SQLEXPRESS;"   # 💡 kendi server adını yaz
-    "Database=ArabamML;"
-    "Trusted_Connection=yes;"
-)
-conn = pyodbc.connect(conn_str)
-cursor = conn.cursor()
+# -------------------------------
+# ⚙️ Veritabanı Bağlantısı
+# -------------------------------
+try:
+    conn_str = (
+        "Driver={SQL Server};"
+        "Server=DESKTOP-7NNG9GJ\\SQLEXPRESS;"
+        "Database=ArabamML;"
+        "Trusted_Connection=yes;"
+    )
+    conn = pyodbc.connect(conn_str)
+    cursor = conn.cursor()
+    print("✅ Veritabanına bağlandı.")
+except Exception as e:
+    st.error(f"❌ Veritabanı bağlantısı başarısız: {e}")
+    st.stop()
 
 admin_list = ["alikomas@gmail.com", "admin@arabam.com"]
 
-# ------------------------------------------
+# -------------------------------
 # 1️⃣ Kullanıcı Girişi
-# ------------------------------------------
-
+# -------------------------------
 st.markdown('<div id="kullanici"></div>', unsafe_allow_html=True)
-
-
 st.title("🚗 Arabam.com Fiyat Tahmin ve Kayıt Sistemi")
 
 st.divider()
@@ -183,12 +155,10 @@ if st.button("🔐 Giriş Yap / Kaydol"):
             st.info(f"👋 Hoş geldiniz tekrar, {adsoyad.split()[0]}!")
         st.session_state["giris"] = True
 
-# ------------------------------------------
+# -------------------------------
 # 2️⃣ Araç Özellikleri + Tahmin
-# ------------------------------------------
+# -------------------------------
 st.markdown('<div id="tahmin"></div>', unsafe_allow_html=True)
-
-
 st.divider()
 st.subheader("🚙 Araç Özellikleri")
 
@@ -226,13 +196,10 @@ else:
     else:
         st.write("Henüz tahmin geçmişin bulunmuyor.")
 
-# ------------------------------------------
+# -------------------------------
 # 3️⃣ Admin Panel (Grafikler)
-# ------------------------------------------
+# -------------------------------
 st.markdown('<div id="admin"></div>', unsafe_allow_html=True)
-
-
-
 st.divider()
 if email in admin_list:
     st.subheader("🧑‍💼 Admin Paneli — Genel Görünüm")
