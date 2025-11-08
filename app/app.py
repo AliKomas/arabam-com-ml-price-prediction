@@ -12,14 +12,25 @@ import os
 # -------------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "arabam_fiyat_tahmin_modeli.pkl")
+ENCODER_PATH = os.path.join(BASE_DIR, "model", "label_encoders.pkl")
+DATA_PATH = os.path.join(BASE_DIR, "data", "arabalar.csv")
 
-# ✅ Modeli güvenli şekilde yükle
+# ✅ Model ve Encoder yükle
 try:
     model = joblib.load(MODEL_PATH)
-    print(f"✅ Model başarıyla yüklendi: {MODEL_PATH}")
+    encoders = joblib.load(ENCODER_PATH)
+    print("✅ Model ve encoder başarıyla yüklendi.")
 except FileNotFoundError:
-    st.error(f"❌ Model dosyası bulunamadı: {MODEL_PATH}")
+    st.error("❌ Model veya encoder dosyası bulunamadı.")
     st.stop()
+
+# ✅ Marka–Model verisini oku (güvenli okuma)
+try:
+    df_data = pd.read_csv(DATA_PATH, dtype=str).fillna("")
+    print("✅ arabalar.csv başarıyla yüklendi.")
+except FileNotFoundError:
+    st.warning("⚠️ Marka–model listesini oluşturmak için arabalar.csv bulunamadı.")
+    df_data = pd.DataFrame(columns=["Marka", "Model"])
 
 # -------------------------------
 # 🎨 Arayüz Ayarları
@@ -165,36 +176,53 @@ st.subheader("🚙 Araç Özellikleri")
 if not st.session_state["giris"]:
     st.warning("⚠️ Lütfen önce giriş yapın.")
 else:
+    # ✅ Dinamik Marka–Model Dropdown (NaN güvenli)
+    marka_listesi = sorted(df_data["Marka"].dropna().astype(str).unique()) if not df_data.empty else encoders["Marka"].classes_
+    marka = st.selectbox("Marka", marka_listesi)
+
+    if not df_data.empty and "Model" in df_data:
+        model_listesi = (
+            df_data[df_data["Marka"].astype(str) == str(marka)]["Model"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+        model_listesi = sorted(model_listesi)
+    else:
+        model_listesi = encoders["Model"].classes_
+
+    model_adi = st.selectbox("Model", model_listesi)
+
+    # Diğer Özellikler
     col1, col2 = st.columns(2)
     with col1:
         motor_hacmi = st.number_input("Motor Hacmi (cc)", 800, 6000, 1600)
-        yakit_tipi = st.selectbox("Yakıt Tipi", ["Benzin", "Dizel", "Hybrid", "Elektrik"])
+        yakit_tipi = st.selectbox("Yakıt Tipi", encoders["Yakıt Tipi"].classes_)
     with col2:
         motor_gucu = st.number_input("Motor Gücü (hp)", 50, 500, 120)
         km = st.number_input("Kilometre", 0, 500000, 100000)
-
     arac_yasi = st.slider("Araç Yaşı", 0, 50, 5, format="%d yıl")
-    yakit_map = {"Benzin": 0, "Dizel": 1, "Hybrid": 2, "Elektrik": 3}
-    yakit_kod = yakit_map[yakit_tipi]
+
+    # Encode et
+    marka_kod = encoders["Marka"].transform([marka])[0]
+    model_kod = encoders["Model"].transform([model_adi])[0]
+    yakit_kod = encoders["Yakıt Tipi"].transform([yakit_tipi])[0]
 
     if st.button("📈 Tahmin Et ve Kaydet"):
-        veri = np.array([[motor_hacmi, motor_gucu, km, arac_yasi, yakit_kod]])
+        veri = np.array([[marka_kod, model_kod, motor_hacmi, motor_gucu, km, arac_yasi, yakit_kod]])
         tahmin = model.predict(veri)[0]
         st.success(f"💰 Tahmini Fiyat: {tahmin:,.0f} ₺")
 
         cursor.execute("""
-            INSERT INTO Tahminler (AdSoyad, Email, MotorHacmi, MotorGucu, Km, AracYasi, YakitTipi, Tahmin, TahminTarihi)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (adsoyad, email, motor_hacmi, motor_gucu, km, arac_yasi, yakit_tipi, tahmin, datetime.datetime.now()))
+            INSERT INTO Tahminler (AdSoyad, Email, Marka, Model, MotorHacmi, MotorGucu, Km, AracYasi, YakitTipi, Tahmin, TahminTarihi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (adsoyad, email, marka, model_adi, motor_hacmi, motor_gucu, km, arac_yasi, yakit_tipi, tahmin, datetime.datetime.now()))
         conn.commit()
         st.info("✅ Tahmin veritabanına kaydedildi.")
 
     st.markdown("### 📋 Geçmiş Tahminlerin")
     df_user = pd.read_sql("SELECT * FROM Tahminler WHERE Email = ? ORDER BY TahminTarihi DESC", conn, params=[email])
-    if len(df_user) > 0:
-        st.dataframe(df_user, use_container_width=True)
-    else:
-        st.write("Henüz tahmin geçmişin bulunmuyor.")
+    st.dataframe(df_user, use_container_width=True)
 
 # -------------------------------
 # 3️⃣ Admin Panel (Grafikler)
@@ -209,14 +237,14 @@ if email in admin_list:
     col_a1, col_a2 = st.columns(2)
     with col_a1:
         yakit_df = df.groupby("YakitTipi")["Tahmin"].mean().reset_index()
-        plt.figure(figsize=(5,3))
+        plt.figure(figsize=(5, 3))
         plt.bar(yakit_df["YakitTipi"], yakit_df["Tahmin"], color="#2563eb")
         plt.title("Yakıt Tipine Göre Ortalama Fiyat")
         st.pyplot(plt)
 
     with col_a2:
         yas_df = df.groupby("AracYasi")["Tahmin"].mean().reset_index()
-        plt.figure(figsize=(5,3))
+        plt.figure(figsize=(5, 3))
         plt.plot(yas_df["AracYasi"], yas_df["Tahmin"], marker='o', color="#6366f1")
         plt.title("Araç Yaşına Göre Ortalama Fiyat")
         st.pyplot(plt)
